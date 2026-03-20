@@ -175,3 +175,11 @@ pyrightconfig.json
 
 # End of https://www.toptal.com/developers/gitignore/api/python
 
+# Image datasets
+data/raw/images/
+data/processed/images/
+
+# Test data (provided by instructor)
+test_data/*.csv
+test_data/*.json
+test_data/images/
