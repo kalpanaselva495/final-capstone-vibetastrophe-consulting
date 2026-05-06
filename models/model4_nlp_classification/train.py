@@ -1,214 +1,30 @@
-#!/usr/bin/env python3
-"""
-Model 4: NLP Classification — Training Script
-===============================================
-Train a text classification model on your scenario's text data.
-
-Approaches (pick one):
-- TF-IDF + traditional classifier (simplest, often surprisingly good)
-- LSTM / GRU neural network
-- Fine-tuned transformer (BERT, DistilBERT)
-
-IMPORTANT: Save your vectorizer/tokenizer alongside the model — you'll need
-the same text preprocessing at prediction time.
-"""
 from pathlib import Path
+
+import numpy as np
+import pandas as pd
 import torch
+import json
 
- 
+from datasets import Dataset
 
-PROCESSED_DATA = Path("data/raw/smart_city_csvs/urbanpulse_311_complaints.csv")
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import classification_report, f1_score, confusion_matrix, accuracy_score
+from sklearn.preprocessing import LabelEncoder
+from sklearn.utils.class_weight import compute_class_weight
+from torch.nn import compute_class_weight, CrossEntropyLoss
+
+from transformers import (
+    DistilBertTokenizerFast,
+    DistilBertForSequenceClassification,
+    DistilBertConfig,
+    Trainer,
+    TrainingArguments,
+    DataCollatorWithPadding,
+)
+
+DATA_PATH = Path("data/raw/smart_city_csvs/urbanpulse_311_complaints.csv")
 SAVED_MODEL_DIR = Path("./models/model4_nlp_classification/saved_model")
 
-
-def load_data():
-    """Load text data from data/processed/.
-
-    Use the shared pipeline:
-        from pipelines.data_pipeline import load_processed_data
-        df = load_processed_data()
-    """
-    from pipelines.data_pipeline import load_raw_data
-    df = load_raw_data()
-    return df
-    
-
-
-def preprocess_text(texts):
-    """Clean and prepare text for modeling.
-
-    Common steps:
-    - Lowercase
-    - Handle abbreviations and slang
-    - Tokenize
-    - Remove stopwords (optional — sometimes they help)
-
-    IMPORTANT: Apply the SAME preprocessing at prediction time.
-    """
-    # TODO: Clean your text data
-    from transformers import DistilBertTokenizerFast
-    tokenizer = DistilBertTokenizerFast.from_pretrained('distilbert-base-uncased')
-    texts = list(texts)
-    tokenized_texts = tokenizer(texts, truncation = True, batched = True, max_length=128)
-    return tokenized_texts
-
-    
-
-
-def vectorize_text(texts):
-    """Convert text to numerical features.
-
-    Option 1 — TF-IDF (simplest):
-        from sklearn.feature_extraction.text import TfidfVectorizer
-        vectorizer = TfidfVectorizer(max_features=10000, ngram_range=(1, 2))
-        X = vectorizer.fit_transform(texts)
-        # Save vectorizer! You need it at prediction time.
-        joblib.dump(vectorizer, SAVED_MODEL_DIR / "vectorizer.joblib")
-
-    Option 2 — Embeddings (for neural network approaches):
-        from tensorflow.keras.preprocessing.text import Tokenizer
-        tokenizer = Tokenizer(num_words=10000)
-        tokenizer.fit_on_texts(texts)
-    """
-    # TODO: Vectorize your text
-
-import torch
-class ComplaintDataset(torch.utils.data.Dataset):
-    def __init__(self, encodings, labels):
-        self.encodings = encodings
-        self.labels = labels
-
-    def __getitem__(self, idx):
-        item = {
-            key: torch.tensor(val[idx]) for key, val in self.encodings.items()
-        }
-        item["labels"] = torch.tensor(self.labels[idx], dtype=torch.long)
-        return item
-
-    def __len__(self):
-        return len(self.labels)
-
-
-
-def compute_metrics(eval_pred):
-    import numpy as np
-    from sklearn.metrics import accuracy_score, f1_score
-    logits, labels = eval_pred
-    preds = np.argmax(logits, axis=1)
-
-    acc = accuracy_score(labels, preds)
-    f1 = f1_score(labels, preds, average="weighted")
-
-    return {
-        "accuracy": acc,
-        "weighted_f1": f1
-    }
-
-
-def train_model(X_train, y_train):
-    """Train your text classifier.
-
-    TF-IDF approach:
-        from sklearn.linear_model import LogisticRegression
-        model = LogisticRegression(class_weight='balanced', max_iter=1000)
-        model.fit(X_train, y_train)
-
-    Neural network approach:
-        import tensorflow as tf
-        model = tf.keras.Sequential([...])
-    """
-    # TODO: Train your model
-    from transformers import Trainer, TrainingArguments, DistilBertTokenizerFast, DistilBertForSequenceClassification, DataCollatorWithPadding
-    from sklearn.metrics import classification_report, f1_score, confusion_matrix
-    
-    train_dataset = ComplaintDataset(X_train, y_train)
-
-    model = DistilBertForSequenceClassification.from_pretrained('distilbert-base-uncased', num_labels=6)
-    data_collator = DataCollatorWithPadding(tokenizer=DistilBertTokenizerFast.from_pretrained('distilbert-base-uncased'))
-
-    for param in model.distilbert.parameters():
-        param.requires_grad = False
-    for layer in model.distilbert.transformer.layer[-1:]:
-        param.requires_grad = True 
-    for param in model.pre_classifier.parameters():
-        param.requires_grad = True
-    for param in model.classifier.parameters():
-        param.requires_grad = True
-
-    training_args = TrainingArguments(
-        output_dir = SAVED_MODEL_DIR,
-        num_train_epochs = 3,
-        per_device_train_batch_size = 16,
-        learning_rate = 2e-5,
-        weight_decay = 0.01,
-        save_strategy = "epoch",
-        logging_strategy = "epoch",
-    )
-
-    trainer = Trainer(
-    model = model,
-    args = training_args,
-    train_dataset = train_dataset,
-    data_collator = data_collator,
-    compute_metrics = compute_metrics,
-    )
-    
-    trainer.train()
-
-    return trainer
-
-    
-
-
-def evaluate_model(trainer, X_val, y_val):      #model, X_val, y_val):
-    """Evaluate NLP model performance.
-
-    Must include:
-    - Classification report per category
-    - Weighted F1 score
-    - Confusion matrix
-    - Example predictions with actual text
-    """
-    # TODO: Evaluate your model
-    from sklearn.metrics import classification_report, f1_score, confusion_matrix
-    import numpy as np
-
-    val_dataset = ComplaintDataset(X_val, y_val)
-
-    predictions = trainer.predict(val_dataset)
-
-    logits = predictions.predictions
-    y_true = predictions.label_ids
-    y_pred = np.argmax(logits, axis=1)
-
-    print("Weighted F1:")
-    print(f1_score(y_true, y_pred, average="weighted"))
-
-    print("\nClassification Report:")
-    print(classification_report(y_true, y_pred))
-
-    print("\nConfusion Matrix:")
-    print(confusion_matrix(y_true, y_pred))
-
-    
-
-
-def save_model(trainer):
-    """Save model AND vectorizer/tokenizer.
-
-    IMPORTANT: You must save both the model and the text preprocessor.
-
-    Example:
-        import joblib
-        SAVED_MODEL_DIR.mkdir(parents=True, exist_ok=True)
-        joblib.dump(model, SAVED_MODEL_DIR / "model.joblib")
-        joblib.dump(vectorizer, SAVED_MODEL_DIR / "vectorizer.joblib")
-    """
-    # TODO: Save your model and vectorizer
-    trainer.save_model(SAVED_MODEL_DIR)
-    trainer.tokenizer.save_pretrained(SAVED_MODEL_DIR)
-    
-import pandas as pd
 def create_complaint_categories(df: pd.DataFrame) -> pd.DataFrame:
 
   
@@ -228,56 +44,241 @@ def create_complaint_categories(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def main():
-    # 1. Load data
-    import pandas as pd
-    from pathlib import Path
-    
-    df = pd.read_csv(Path("data/raw/smart_city_csvs/urbanpulse_311_complaints.csv"))
+def load_data():
 
+    df = pd.read_csv(DATA_PATH)
     df = create_complaint_categories(df)
+    urban_df = df.copy()
+    urban_df['complaint_type'] = urban_df['complaint_category']
+    urban_df = urban_df[['complaint_type', 'resolution_description']]
+    urban_df = urban_df.rename(columns = {
+        "resolution_description" : "text",
+        "complaint_type" : "label"
+    })
 
-    y = df['complaint_category']
-    X = df['resolution_description']
+    return urban_df 
 
-    from sklearn.model_selection import train_test_split
-    X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.3,
-    random_state=42, stratify=y)
 
-    X_train_encoded = preprocess_text(X_train)
-    X_val_encoded = preprocess_text(X_val)
+def split_data(texts, labels):
 
-    from sklearn.preprocessing import LabelEncoder
+    X_train, X_val, y_train, y_val = train_test_split(
+        texts,
+        labels,
+        test_size=0.3,
+        random_state=42,
+        stratify = labels)
+
+    return X_train, X_val, y_train, y_val
+
+tokenizer = DistilBertTokenizerFast.from_pretrained("distilbert-base-uncased")
+
+def tokenize_text(examples):
+
+    return tokenizer(
+        examples['text'],
+        padding = "max_length",
+        truncation = True,
+        max_length = 128,
+    )
+
+def label_encode(y_train, y_val):
+    
     le = LabelEncoder()
+
     y_train_encoded = le.fit_transform(y_train)
     y_val_encoded = le.transform(y_val)
+    id2label = {i: label for i, label in enumerate(le.classes_)}
+    label2id = {label: i for i, label in enumerate(le.classes_)}
 
-    trainer = train_model(X_train_encoded, y_train_encoded)
+    return y_train_encoded, y_val_encoded, le, id2label, label2id
 
-    evaluate_model(trainer, X_val_encoded, y_val_encoded)
+def convert_hf_dataset(X__train, X_val, y_train_encoded, y_val_encoded):
 
-    save_model(trainer)
+    train_df = pd.DataFrame({
+        "text": X_train.tolist(),
+        "label": y_train_encoded
+    })
 
-    # 2. Preprocess text
-    # texts = preprocess_text(df["text_column"])
+    val_df = pd.DataFrame({
+        "text": X_val.tolist(),
+        "label": y_val_encoded
+    })
 
-    # 3. Vectorize
-    # X = vectorize_text(texts)
+    train_dataset = Dataset.from_pandas(train_df)
+    val_dataset = Dataset.from_pandas(val_df)
 
-    # 4. Split (use stratified split for imbalanced classes)
-    # X_train, X_val, y_train, y_val = train_test_split(X, y, stratify=y)
+    train_dataset = train_dataset.map(tokenize_text, batched=True)
+    val_dataset = val_dataset.map(tokenize_text, batched=True)
 
-    # 5. Train
-    # model = train_model(X_train, y_train)
+    train_dataset = train_dataset.remove_columns(["text"])
+    val_dataset = val_dataset.remove_columns(["text"])
 
-    # 6. Evaluate
-    # evaluate_model(model, X_val, y_val)
+    train_dataset.set_format("torch")
+    val_dataset.set_format("torch")
 
-    # 7. Save model + vectorizer
-    # save_model(model)
+    return train_dataset, val_dataset
 
-    print("Training complete!")
+def compute_metrics(eval_pred):
+    logits, labels = eval_pred
+    preds = np.argmax(logits, axis=1)
+
+    return {
+        "accuracy": accuracy_score(labels, preds),
+        "weighted_f1": f1_score(labels, preds, average="weighted"),
+        "macro_f1": f1_score(labels, preds, average="macro")
+    }
+
+def get_class_weights(y_train_encoded):
+    class_weights = compute_class_weight(
+    class_weight="balanced",
+    classes=np.unique(y_train_encoded),
+    y=y_train_encoded
+    )
+
+    return torch.tensor(class_weights, dtype=torch.float)
+
+
+
+from torch.nn import CrossEntropyLoss
+
+class WeightedTrainer(Trainer):
+    def __init__(self, *args, class_weights=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.class_weights = class_weights
+
+    def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
+        labels = inputs.get("labels")
+
+        outputs = model(**inputs)
+        logits = outputs.get("logits")
+
+        loss_fct = CrossEntropyLoss(
+            weight=self.class_weights.to(logits.device)
+        )
+
+        loss = loss_fct(
+            logits.view(-1, model.config.num_labels),
+            labels.view(-1)
+        )
+
+        return (loss, outputs) if return_outputs else loss
+    
+config = DistilBertConfig.from_pretrained(
+    "distilbert-base-uncased",
+    num_labels = 6,
+    dropout = 0.3,
+    attention_dropout = 0.3
+)
+
+model = DistilBertForSequenceClassification.from_pretrained(
+    "distilbert-base-uncased",
+    config = config)
+
+def train_model(train_dataset, val_dataset, model, tokenizer, y_train_encoded):
+
+    data_collator = DataCollatorWithPadding(tokenizer = tokenizer)
+
+    for param in model.distilbert.parameters():
+        param.requires_grad = False
+    for param in model.distilbert.transformer.layer[-3:].parameters():
+        param.requires_grad = True
+    for param in model.classifier.parameters():
+        param.requires_grad = True
+
+    training_args = TrainingArguments(
+        num_train_epochs = 5,
+        per_device_train_batch_size = 32,
+        per_device_eval_batch_size = 32,
+        learning_rate = 3e-5,
+        weight_decay = 0.02,
+        warmup_ratio = 0.1,
+        lr_scheduler_type = 'linear',
+        evaluation_strategy = 'epoch',
+        save_strategy = 'epoch',
+        logging_strategy = 'epoch',
+        load_best_model_at_end = True,
+        metric_for_best_model = 'weighted_f1',
+        greater_is_better = True
+    )
+
+    class_weights = get_class_weights(y_train_encoded)
+
+    trainer = WeightedTrainer(
+        model = model,
+        args = training_args,
+        train_dataset = train_dataset,
+        eval_dataset = val_dataset,
+        tokenizer = tokenizer,
+        data_collator = data_collator,
+        compute_metrics = compute_metrics,
+        class_weights = class_weights
+    )
+
+    trainer.train()
+    
+    return model, trainer
+
+def evaluate_model(trainer, val_dataset, label_encoder):
+
+    predictions = trainer.predict(val_dataset)
+
+    logits = predictions.predictions
+    y_true = predictions.label_ids
+    y_pred = np.argmax(logits, axis=1)
+
+    y_true_labels = label_encoder.inverse_transform(y_true)
+    y_pred_labels = label_encoder.inverse_transform(y_pred)
+
+    print("Weighted F1:")
+    print(f1_score(y_true_labels, y_pred_labels, average="weighted"))
+
+    print("\nMacro F1:")
+    print(f1_score(y_true_labels, y_pred_labels, average="macro"))
+
+    print("\nClassification Report:")
+    print(classification_report(y_true_labels, y_pred_labels))
+
+    print("\nConfusion Matrix:")
+    labels = label_encoder.classes_
+    print(confusion_matrix(y_true_labels, y_pred_labels, labels=labels))
+
+
+def save_model(trainer):
+    
+    trainer.save_model(SAVED_MODEL_DIR)
+    trainer.tokenizer.save_pretrained(SAVED_MODEL_DIR)
+    
+    with open(SAVED_MODEL_DIR / "id2label.json", "w") as f:
+
+        json.dump(id2label, f)
+
+    print("Model Saved Successfully")
+    print("Model Saved Successfully")
+
+
+def main(): 
+
+    df = load_data()
+
+    texts = df['text']
+    labels = df['label']
+
+    X_train, X_val, y_train, y_val = split_data(texts, labels)
+
+    y_train_encoded, y_val_encoded, le, id2label, label2id = label_encode(y_train, y_val)
+
+    train_dataset, val_dataset = convert_hf_dataset(X_train, X_val, y_train_encoded, y_val_encoded)
+
+    model, trainer = train_model(train_dataset, val_dataset, model, tokenizer, y_train_encoded)
+
+    evaluate_model(trainer, val_dataset, le)
+
+    save_model(trainer, id2label)
+
+    print("Training Complete, Model Saved Successfully!")
 
 
 if __name__ == "__main__":
     main()
+
+
