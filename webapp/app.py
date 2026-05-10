@@ -186,6 +186,10 @@ elif model_choice == "Model 1: Traditional ML":
         return joblib.load("models/model1_traditional_ml/saved_model/model.joblib")
     
     @st.cache_resource
+    def load_scaler1():
+        return joblib.load("models/model1_traditional_ml/saved_model/scaler.joblib")
+    
+    @st.cache_resource
     def load_feature_cols():
         return joblib.load("models/model1_traditional_ml/saved_model/feature_columns.joblib")
     
@@ -194,7 +198,7 @@ elif model_choice == "Model 1: Traditional ML":
         col for col in loaded_feature_cols if col not in {"Severity"}
     ]
     model = load_model1()
-    
+    scaler = load_scaler1()
     total_columns = len(feature_cols)
     # Create input fields for your features
     col1, col2 = st.columns(2)
@@ -253,7 +257,9 @@ elif model_choice == "Model 1: Traditional ML":
             raw_value = st.session_state[feature]
             input_data[feature] = convert_feature_value(feature, raw_value)
 
+        # input_data.pop("Severity_Binary", None)  # Remove target if accidentally included 
         input_df = pd.DataFrame([input_data])
+        input_df[feature_cols] = scaler.transform(input_df[feature_cols])
 
         prediction = model.predict(input_df)
         probability = model.predict_proba(input_df)

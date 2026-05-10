@@ -11,6 +11,7 @@ import pandas as pd
 import platform
 from pathlib import Path
 import tensorflow as tf
+from sklearn.preprocessing import StandardScaler
 
 
 # Paths
@@ -81,8 +82,10 @@ def main():
     # TODO: Update this path to match your test data file
     test_df = pd.read_csv(TEST_DATA_DIR / "City_traffic_Test.csv")
     
+    scaler = StandardScaler()
+    scaled_test_df = scaler.transform(test_df)
     # Generate predictions
-    predictions = predict(model, test_df)
+    predictions = predict(model, scaled_test_df)
 
     # Save results — MUST match output template exactly
     # The predictions are in a two dimensional array. I need to extract the results so they will fit in a column in the dataframe.
