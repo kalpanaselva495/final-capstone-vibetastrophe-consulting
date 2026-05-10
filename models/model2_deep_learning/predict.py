@@ -11,13 +11,26 @@ import pandas as pd
 import platform
 from pathlib import Path
 import tensorflow as tf
-from sklearn.preprocessing import StandardScaler
+import joblib
+import numpy as np
 
 
 # Paths
 MODEL_PATH = Path("models/model2_deep_learning/saved_model/")
 TEST_DATA_DIR = Path("test_data/")
 OUTPUT_FILE = TEST_DATA_DIR / "model2_results.csv"
+
+features = [
+    'Distance(mi)', 'Timezone', 
+    'Temperature(F)', 'Wind_Chill(F)', 'Humidity(%)', 'Pressure(in)', 
+    'Visibility(mi)', 'Wind_Speed(mph)', 'Precipitation(in)', 
+    'wind_dir_deg', 'weather_cond_num', 'accident_dir',
+    'hour','day_of_week','month','is_weekend',
+    'is_morning_rush','is_evening_rush','is_rush_hour',
+    'duration_min','wind_dir_deg','weather_cond_num','weather_data_available',
+    'is_freezing','low_visibility','accident_dir','lat_bin',
+    'n_road_features','has_traffic_control'
+]
 
 def is_apple_silicon():
     return (
@@ -46,7 +59,8 @@ def load_model():
         model = tf.keras.models.load_model(MODEL_PATH / "model.keras")
     """
     model = tf.keras.models.load_model(MODEL_PATH / "model.keras")
-    return model
+    scaler = joblib.load(MODEL_PATH / "scaler.joblib")
+    return model, scaler
 
 def predict(model, test_data):
     """Generate predictions on test data.
@@ -54,19 +68,12 @@ def predict(model, test_data):
     Should return a DataFrame with columns: id, prediction, probability, confidence
     """
 
-    features = [
-        'Distance(mi)', 'Timezone', 
-         'Temperature(F)', 'Wind_Chill(F)', 'Humidity(%)', 'Pressure(in)', 
-        'Visibility(mi)', 'Wind_Speed(mph)', 'Precipitation(in)', 
-        'wind_dir_deg', 'weather_cond_num', 'accident_dir',
-        'hour','day_of_week','month','is_weekend',
-        'is_morning_rush','is_evening_rush','is_rush_hour',
-        'duration_min','wind_dir_deg','weather_cond_num','weather_data_available',
-        'is_freezing','low_visibility','accident_dir','lat_bin',
-        'n_road_features','has_traffic_control'
-    ]
-    X = test_data[features].copy()
-    
+    # Accept either a DataFrame (unscaled) or a numpy array (already scaled).
+    if isinstance(test_data, pd.DataFrame):
+        X = test_data[features].copy()
+    else:
+        X = np.asarray(test_data)
+
     predictions = model.predict(X)
     return predictions
 
@@ -76,24 +83,28 @@ def main():
         disable_gpus()
 
     # Load model
-    model = load_model()
+    model, scaler = load_model()
 
     # Load test data
-    # TODO: Update this path to match your test data file
     test_df = pd.read_csv(TEST_DATA_DIR / "City_traffic_Test.csv")
     
-    scaler = StandardScaler()
-    scaled_test_df = scaler.transform(test_df)
+
+    scaled_test_df = scaler.transform(test_df[features])
     # Generate predictions
     predictions = predict(model, scaled_test_df)
+
+    # Binary classifier (sigmoid): model outputs positive-class probability per row.
+    positive_probs = predictions.ravel()
+    predicted_labels = (positive_probs >= 0.5).astype(int)
+    confidence_scores = np.where(predicted_labels == 1, positive_probs, 1 - positive_probs)
 
     # Save results — MUST match output template exactly
     # The predictions are in a two dimensional array. I need to extract the results so they will fit in a column in the dataframe.
     results = pd.DataFrame({
         "id": test_df["ID"],
-        "prediction": predictions.argmax(axis=1),  # Assuming a classification model with one-hot encoded outputs
-        "probability": predictions.max(axis=1),  # The probability of the predicted class
-        "confidence": predictions.max(axis=1) / predictions.sum(axis=1)  #
+        "prediction": predicted_labels,
+        "probability": positive_probs,
+        "confidence": confidence_scores,
     })
     results.to_csv(OUTPUT_FILE, index=False)
 
