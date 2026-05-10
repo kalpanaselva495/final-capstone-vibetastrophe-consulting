@@ -274,7 +274,15 @@ elif model_choice == "Model 2: Deep Learning":
     # TODO: Load your DNN model and add prediction interface
     # Same pattern as Model 1, but load with:
     import tensorflow as tf
-    model = tf.keras.models.load_model("models/model2_deep_learning/saved_model/model.keras")
+
+    @st.cache_resource
+    def load_model2():
+         return tf.keras.models.load_model("models/model2_deep_learning/saved_model/model.keras")
+    # model = tf.keras.models.load_model("models/model2_deep_learning/saved_model/model.keras")
+
+    @st.cache_resource
+    def load_scaler2():
+        return joblib.load("models/model2_deep_learning/saved_model/scaler.joblib")
     
         # The 29-column list used at training time (includes intentional duplicates)
     model2_features = [
@@ -290,6 +298,9 @@ elif model_choice == "Model 2: Deep Learning":
     ]
     # Unique features for UI (order-preserved, no duplicates)
     features = list(dict.fromkeys(model2_features))
+
+    model = load_model2()
+    scaler = load_scaler2()
 
     total_columns = len(features)
     col1, col2 = st.columns(2)
@@ -350,8 +361,10 @@ elif model_choice == "Model 2: Deep Learning":
         for feature in features:
             raw_value = st.session_state[feature]
             input_data[feature] = convert_feature_value(feature, raw_value)
+            
         input_df = pd.DataFrame([input_data])[model2_features]  # 29 cols with duplicates
-        predictions = model.predict(input_df)
+        scaled_input_df = scaler.transform(input_df)
+        predictions = model.predict(scaled_input_df)
         label = "High Severity" if predictions[0][0] >= 0.5 else "Low Severity"
         st.success(f"Prediction: {label}")
         st.write(f"Confidence: {predictions[0][0]:.2%}")
