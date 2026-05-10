@@ -19,6 +19,7 @@ from sklearn.metrics import (
 import platform
 from sklearn.utils.class_weight import compute_class_weight
 import numpy as np
+import joblib
 
 PROCESSED_DATA = Path("data/processed/")
 SAVED_MODEL_DIR = Path("models/model2_deep_learning/saved_model/")
@@ -116,7 +117,7 @@ def preprocess_features(df):
     if not np.isfinite(X_train_scaled).all() or not np.isfinite(X_test_scaled).all():
         raise ValueError("Scaled feature matrix contains non-finite values.")
 
-    return X_train_scaled, X_test_scaled, y_train.values, y_test.values
+    return X_train_scaled, X_test_scaled, y_train.values, y_test.values, scaler
 
 
 def build_model(input_dim, num_classes):
@@ -215,7 +216,7 @@ def evaluate_model(model, X_val, y_val):
     print(f"Recall: {recall:.4f}")
     print(f"F1 Score: {f1:.4f}")
 
-def save_model(model):
+def save_model(model, scaler=None):
     """Save the trained model to saved_model/.
 
     Example:
@@ -224,6 +225,9 @@ def save_model(model):
     """
     SAVED_MODEL_DIR.mkdir(parents=True, exist_ok=True)
     model.save(SAVED_MODEL_DIR / "model.keras")
+    if scaler is not None:
+        joblib.dump(scaler, SAVED_MODEL_DIR / "scaler.joblib")
+        print(f"Scaler saved → {SAVED_MODEL_DIR / 'scaler.joblib'}")
 
 
 def main():
@@ -236,7 +240,7 @@ def main():
     df = load_data()
 
     # 2. Preprocess features
-    X_train, X_val, y_train, y_val = preprocess_features(df)
+    X_train, X_val, y_train, y_val, scaler = preprocess_features(df)
 
     # 3. Build model
     model = build_model(input_dim=X_train.shape[1], num_classes=2)
@@ -248,7 +252,7 @@ def main():
     evaluate_model(model, X_val, y_val)
 
     # 6. Save
-    save_model(model)
+    save_model(model, scaler=scaler)
 
     print("Training complete!")
 
