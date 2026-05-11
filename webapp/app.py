@@ -18,10 +18,6 @@ from PIL import Image
 import joblib
 import numpy as np
 import pandas as pd
-from transformers import (
-    DistilBertTokenizerFast,
-    DistilBertForSequenceClassification
-)
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
@@ -79,7 +75,6 @@ traditional_feature_controls = {
     'Severity_Binary': { 'label': 'Severity Binary', 'options': ['Yes', 'No'], 'control': 'selectbox' }
 }
 
-from models.model3_cnn.inference import THRESHOLD, predict_single_image
 
 def convert_feature_value(feature_name, value):
     control_config = traditional_feature_controls[feature_name]
@@ -381,6 +376,7 @@ elif model_choice == "Model 2: Deep Learning":
         
 
 elif model_choice == "Model 3: CNN (Image Classification)":
+    from models.model3_cnn.inference import THRESHOLD, predict_single_image
     st.header("Model 3: CNN — Image Classification")
 
     # ---- INTEGRATION PATTERN (uncomment and adapt) ----
@@ -410,6 +406,7 @@ elif model_choice == "Model 3: CNN (Image Classification)":
     st.info("Not yet implemented — add image upload and classification here.")
 
 elif model_choice == "Model 4: NLP (Text Classification)":
+    from transformers import DistilBertTokenizerFast, DistilBertForSequenceClassification
     st.header("Model 4: NLP — Text Classification")
 
     categories = {
