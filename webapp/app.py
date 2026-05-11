@@ -7,14 +7,18 @@ Run locally:  streamlit run webapp/app.py
 Deploy:       Push to GitHub, then connect to Streamlit Community Cloud
               https://streamlit.io/cloud (free hosting)
 """
+import warnings
+warnings.filterwarnings('ignore')
+
 import streamlit as st
 from pathlib import Path
 import sys
+import json
 from PIL import Image
 import joblib
 import numpy as np
 import pandas as pd
-from transformers import ( 
+from transformers import (
     DistilBertTokenizerFast,
     DistilBertForSequenceClassification
 )
@@ -22,6 +26,11 @@ from transformers import (
 ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
+
+# predict.py uses `from train import ...` so model5_innovation must be on sys.path
+_MODEL5_DIR = str(ROOT_DIR / "models" / "model5_innovation")
+if _MODEL5_DIR not in sys.path:
+    sys.path.insert(0, _MODEL5_DIR)
 
 traditional_feature_controls = { 
     'Distance(mi)': { 'label': 'Distance (mi)', 'min': 0, 'max': 100, 'control': 'slider' },
@@ -433,209 +442,305 @@ elif model_choice == "Model 4: NLP (Text Classification)":
     # ---- END PATTERN ----
 
 elif model_choice == "Model 5: Innovation":
-    st.header("Model 5: Innovation")
-    st.write("Predict 311 complaint category and expected resolution time.")
+    st.header("🛣️ Model 5: Innovation — Road Deterioration Prediction")
+    st.write("Predict NYC 311 road complaint deterioration severity using XGBoost.")
     
+    # ---- Load Model 5 (XGBoost Road Deterioration) ----
     @st.cache_resource
-    def load_model5():
-        base_path = Path("models/model5_innovation/saved_model")
-        return {
-            "clf_model": joblib.load(base_path / "clf_model.joblib"),
-            "clf_le": joblib.load(base_path / "clf_le.joblib"),
-            "reg_model": joblib.load(base_path / "reg_model.joblib"),
-            "reg_le": joblib.load(base_path / "reg_le.joblib"),
-            "reg_feature_cols": joblib.load(base_path / "reg_feature_cols.joblib"),
-        }
-
-    model_bundle = load_model5()
-    clf_model = model_bundle["clf_model"]
-    clf_le = model_bundle["clf_le"]
-    reg_model = model_bundle["reg_model"]
-    reg_le = model_bundle["reg_le"]
-
-    status_mapping = {
-        "Open": 0,
-        "Assigned": 1,
-        "Started": 2,
-        "In Progress": 3,
-        "Pending": 4,
-        "Closed": 5,
-        "Unspecified": 0,
+    def load_model5_xgb():
+        base_path = Path(__file__).resolve().parent.parent / "models" / "model5_innovation" / "saved_model"
+        
+        model = joblib.load(str(base_path / "road_xgb_model.joblib"))
+        scaler = joblib.load(str(base_path / "road_xgb_scaler.joblib"))
+        
+        with open(str(base_path / "road_xgb_features.json"), 'r') as f:
+            features = json.load(f)
+        
+        return {"model": model, "scaler": scaler, "features": features}
+    
+    try:
+        model5_bundle = load_model5_xgb()
+        model = model5_bundle["model"]
+        scaler = model5_bundle["scaler"]
+        feature_names = model5_bundle["features"]
+        model5_loaded = True
+    except Exception as e:
+        st.error(f"Failed to load Model 5: {e}")
+        model5_loaded = False
+    
+    if not model5_loaded:
+        st.stop()
+    
+    # ---- Constants ----
+    ROAD_COMPLAINT_TYPES = {
+        'Street Condition', 'Snow or Ice', 'Traffic Signal Condition',
+        'Blocked Driveway', 'Street Light Condition',
+        'Highway Sign - Damaged', 'Highway Sign - Missing',
+        'Sidewalk Condition', 'Curb Condition', 'Pothole',
     }
-
-    day_names = [
-        "Monday",
-        "Tuesday",
-        "Wednesday",
-        "Thursday",
-        "Friday",
-        "Saturday",
-        "Sunday",
-    ]
-    month_names = [
-        "January",
-        "February",
-        "March",
-        "April",
-        "May",
-        "June",
-        "July",
-        "August",
-        "September",
-        "October",
-        "November",
-        "December",
-    ]
-    season_mapping = {
-        12: 0,
-        1: 0,
-        2: 0,
-        3: 1,
-        4: 1,
-        5: 1,
-        6: 2,
-        7: 2,
-        8: 2,
-        9: 3,
-        10: 3,
-        11: 3,
+    
+    COMPLAINT_SEVERITY = {
+        'Street Condition': 3, 'Pothole': 3,
+        'Sidewalk Condition': 2, 'Curb Condition': 2,
+        'Snow or Ice': 2, 'Traffic Signal Condition': 2,
+        'Blocked Driveway': 1, 'Street Light Condition': 1,
+        'Highway Sign - Damaged': 2, 'Highway Sign - Missing': 1,
     }
-
-    def get_hour_bucket(hour):
-        if hour < 6:
-            return 0
-        if hour < 12:
-            return 1
-        if hour < 18:
-            return 2
-        return 3
-
-    def build_onehot_value(feature_name):
-        if feature_name.startswith("borough_"):
-            return feature_name.split("borough_", 1)[1]
-        if feature_name.startswith("open_data_channel_type_"):
-            return feature_name.split("open_data_channel_type_", 1)[1]
-        if feature_name.startswith("agency_"):
-            return feature_name.split("agency_", 1)[1]
-        return None
-
-    def build_feature_row(feature_names, *, status, created_hour, created_dayofweek, created_month,
-                          is_resolved, borough, channel, agency, resolution_hours=None,
-                          complaint_type_label=None):
-        row_data = {str(col): 0 for col in feature_names}
-        row_data["status"] = status_mapping[status]
-        row_data["created_hour"] = int(created_hour)
-        row_data["created_dayofweek"] = day_names.index(created_dayofweek)
-        row_data["created_month"] = month_names.index(created_month) + 1
-        row_data["is_resolved"] = 1 if is_resolved else 0
-        row_data["is_weekend"] = 1 if row_data["created_dayofweek"] >= 5 else 0
-        row_data["season"] = season_mapping[row_data["created_month"]]
-        row_data["hour_bucket"] = get_hour_bucket(row_data["created_hour"])
-
-        borough_col = f"borough_{borough}"
-        channel_col = f"open_data_channel_type_{channel}"
-        agency_col = f"agency_{agency}"
-
-        if borough_col in row_data:
-            row_data[borough_col] = 1
-        if channel_col in row_data:
-            row_data[channel_col] = 1
-        if agency_col in row_data:
-            row_data[agency_col] = 1
-
-        if "resolution_hours" in row_data:
-            row_data["resolution_hours"] = float(resolution_hours if resolution_hours is not None else 0.0)
-
-        if "complaint_type_enc" in row_data and complaint_type_label is not None:
-            row_data["complaint_type_enc"] = int(reg_le.transform([complaint_type_label])[0])
-
-        return pd.DataFrame([[row_data[col] for col in feature_names]], columns=feature_names)
-
-    clf_features = [str(col) for col in clf_model.feature_names_in_]
-    reg_features = [str(col) for col in reg_model.feature_names_in_]
-
-    borough_options = [build_onehot_value(c) for c in clf_features if str(c).startswith("borough_")]
-    channel_options = [
-        build_onehot_value(c)
-        for c in clf_features
-        if str(c).startswith("open_data_channel_type_")
+    
+    HIGH_SEVERITY_DESCRIPTOR_KWS = [
+        'POTHOLE', 'CAVE-IN', 'STRUCTURAL', 'BROKEN', 'FAILED',
+        'COLLAPSED', 'SINK', 'ROUGH', 'PITTED', 'CRACK',
     ]
-    agency_options = [build_onehot_value(c) for c in clf_features if str(c).startswith("agency_")]
-
-    col1, col2 = st.columns(2)
-    with col1:
-        input_status = st.selectbox("Status", options=list(status_mapping.keys()), index=3)
-        input_hour = st.slider("Created Hour", min_value=0, max_value=23, value=12)
-        input_day = st.selectbox("Created Day of Week", options=day_names, index=0)
-        input_month = st.selectbox("Created Month", options=month_names, index=0)
-        input_is_resolved = st.selectbox("Is Resolved", options=["No", "Yes"], index=0)
-    with col2:
-        input_borough = st.selectbox("Borough", options=borough_options, index=0)
-        input_channel = st.selectbox("Open Data Channel Type", options=channel_options, index=0)
-        input_agency = st.selectbox("Agency", options=agency_options, index=0)
-        input_resolution_hours = st.number_input(
-            "Resolution Hours (required for classification model)",
-            min_value=0.0,
-            max_value=10000.0,
-            value=24.0,
-            step=1.0,
-        )
-
-    is_resolved_bool = input_is_resolved == "Yes"
-
-    tab1, tab2 = st.tabs(["Classification", "Regression"])
-
-    with tab1:
-        st.caption("Classification model predicts complaint type.")
-        if st.button("Predict Complaint Type", key="predict_model5_classification"):
-            clf_input = build_feature_row(
-                clf_features,
-                status=input_status,
-                created_hour=input_hour,
-                created_dayofweek=input_day,
-                created_month=input_month,
-                is_resolved=is_resolved_bool,
-                borough=input_borough,
-                channel=input_channel,
-                agency=input_agency,
-                resolution_hours=input_resolution_hours,
+    
+    LEVEL_NAMES = ['🟢 Low', '🟡 Medium', '🟠 High', '🔴 Critical']
+    LEVEL_COLORS = {'Low': '#2ecc71', 'Medium': '#f39c12', 'High': '#e67e22', 'Critical': '#e74c3c'}
+    NUMERIC_FEATURES = [
+        'hour_of_day', 'day_of_week', 'month', 'is_weekend',
+        'severity_weight', 'resolution_hours',
+    ]
+    
+    BOROUGHS = ['BRONX', 'BROOKLYN', 'MANHATTAN', 'QUEENS', 'STATEN ISLAND']
+    STATUSES = ['Closed', 'Open', 'In Progress', 'Pending', 'Started']
+    CHANNELS = ['ONLINE', 'MOBILE', 'PHONE', 'OTHER']
+    DAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+    
+    def _map_descriptor(desc):
+        """Map descriptor text to category."""
+        if not isinstance(desc, str):
+            return 'Other'
+        d = desc.upper()
+        street_keywords = ['STREET', 'SIDEWALK', 'CURB', 'POTHOLE', 'ASPHALT', 'PAVED']
+        if any(kw in d for kw in street_keywords):
+            return 'Street_Sidewalk'
+        return 'Other'
+    
+    def predict_single(complaint_type, descriptor, borough, status, channel,
+                       hour, day_of_week_int, month, resolution_hours):
+        descriptor_cat = _map_descriptor(descriptor)
+        severity_weight = COMPLAINT_SEVERITY.get(complaint_type, 1)
+        
+        # Build feature row
+        row = {str(col): 0 for col in feature_names}
+        row.update({
+            'hour_of_day': hour, 'day_of_week': day_of_week_int,
+            'month': month, 'is_weekend': int(day_of_week_int >= 5),
+            'severity_weight': severity_weight, 'resolution_hours': resolution_hours,
+        })
+        
+        # One-hot encoding
+        for prefix, value in [('borough', borough), ('open_data_channel_type', channel),
+                               ('status', status), ('descriptor_cat', descriptor_cat)]:
+            col = f'{prefix}_{value}'
+            if col in row:
+                row[col] = 1
+        
+        # Create DataFrame and scale
+        df_row = pd.DataFrame([row])[feature_names]
+        num_cols = [c for c in NUMERIC_FEATURES if c in df_row.columns]
+        df_row[num_cols] = scaler.transform(df_row[num_cols])
+        
+        # Predict
+        pred = model.predict(df_row)[0]
+        proba = model.predict_proba(df_row)[0]
+        return int(pred), LEVEL_NAMES[int(pred)], proba
+    
+    # ---- Example presets ----
+    EXAMPLES = {
+        'Low':      {'complaint_type': 'Blocked Driveway', 'descriptor': 'DRIVEWAY', 'borough': 'BRONX', 'status': 'Closed', 'channel': 'ONLINE', 'hour': 9, 'day': 'Tuesday', 'month': 2, 'resolution_hours': 1.0},
+        'Medium':   {'complaint_type': 'Street Light Condition', 'descriptor': 'STREET LIGHT', 'borough': 'QUEENS', 'status': 'Closed', 'channel': 'ONLINE', 'hour': 14, 'day': 'Wednesday', 'month': 2, 'resolution_hours': 6.0},
+        'High':     {'complaint_type': 'Curb Condition', 'descriptor': 'BROKEN CURB', 'borough': 'MANHATTAN', 'status': 'Closed', 'channel': 'ONLINE', 'hour': 10, 'day': 'Tuesday', 'month': 3, 'resolution_hours': 24.0},
+        'Critical': {'complaint_type': 'Street Condition', 'descriptor': 'POTHOLE', 'borough': 'BROOKLYN', 'status': 'Open', 'channel': 'ONLINE', 'hour': 10, 'day': 'Monday', 'month': 2, 'resolution_hours': 300.0},
+    }
+    
+    # Initialize session state with defaults
+    for k, v in EXAMPLES['Low'].items():
+        if f'model5_{k}' not in st.session_state:
+            st.session_state[f'model5_{k}'] = v
+    
+    # Load examples
+    st.markdown('**Load example by severity level:**')
+    ex_cols = st.columns(4)
+    for col, (lvl, ex) in zip(ex_cols, EXAMPLES.items()):
+        if col.button(f'📊 {lvl}', use_container_width=True, key=f'btn_m5_{lvl}'):
+            for k, v in ex.items():
+                st.session_state[f'model5_{k}'] = v
+            st.rerun()
+    
+    st.markdown('---')
+    
+    # Input form
+    with st.form('model5_form'):
+        col1, col2 = st.columns(2)
+        with col1:
+            input_complaint = st.selectbox(
+                "Complaint Type",
+                options=sorted(ROAD_COMPLAINT_TYPES),
+                index=0,
+                key='model5_complaint_type_input',
             )
-
-            pred_encoded = int(clf_model.predict(clf_input)[0])
-            pred_label = clf_le.inverse_transform([pred_encoded])[0]
-            proba = clf_model.predict_proba(clf_input)[0]
-            confidence = float(np.max(proba))
-
-            st.success(f"Predicted Complaint Type: {pred_label}")
-            st.write(f"Confidence: {confidence:.2%}")
-
-    with tab2:
-        st.caption("Regression model predicts expected resolution time.")
-        complaint_options = [str(c) for c in reg_le.classes_]
-        reg_complaint_label = st.selectbox(
-            "Complaint Type for Regression",
-            options=complaint_options,
-            index=0,
-            key="model5_reg_complaint_type",
-        )
-
-        if st.button("Predict Resolution Time", key="predict_model5_regression"):
-            reg_input = build_feature_row(
-                reg_features,
-                status=input_status,
-                created_hour=input_hour,
-                created_dayofweek=input_day,
-                created_month=input_month,
-                is_resolved=is_resolved_bool,
-                borough=input_borough,
-                channel=input_channel,
-                agency=input_agency,
-                complaint_type_label=reg_complaint_label,
+            input_descriptor = st.text_input(
+                "Descriptor (keyword)",
+                value=st.session_state.get('model5_descriptor', 'DRIVEWAY'),
+                key='model5_descriptor_input',
             )
+            input_borough = st.selectbox(
+                "Borough",
+                options=BOROUGHS,
+                index=0 if BOROUGHS else None,
+                key='model5_borough_input',
+            )
+            input_status = st.selectbox(
+                "Status",
+                options=STATUSES,
+                index=0 if STATUSES else None,
+                key='model5_status_input',
+            )
+        
+        with col2:
+            input_channel = st.selectbox(
+                "Channel",
+                options=CHANNELS,
+                index=0 if CHANNELS else None,
+                key='model5_channel_input',
+            )
+            input_hour = st.slider(
+                "Hour of Day",
+                min_value=0,
+                max_value=23,
+                value=st.session_state.get('model5_hour', 12),
+                key='model5_hour_input',
+            )
+            input_day = st.selectbox(
+                "Day of Week",
+                options=DAY_NAMES,
+                index=1,
+                key='model5_day_input',
+            )
+            input_month = st.slider(
+                "Month",
+                min_value=1,
+                max_value=12,
+                value=st.session_state.get('model5_month', 6),
+                key='model5_month_input',
+            )
+            input_resolution = st.number_input(
+                "Resolution Hours",
+                min_value=0.0,
+                max_value=1000.0,
+                value=st.session_state.get('model5_resolution_hours', 24.0),
+                step=1.0,
+                key='model5_resolution_input',
+            )
+        
+        submit = st.form_submit_button("🔍 Predict Deterioration Level", use_container_width=True)
+        
+        if submit:
+            day_idx = DAY_NAMES.index(input_day)
+            pred_level, pred_name, pred_proba = predict_single(
+                complaint_type=input_complaint,
+                descriptor=input_descriptor,
+                borough=input_borough,
+                status=input_status,
+                channel=input_channel,
+                hour=input_hour,
+                day_of_week_int=day_idx,
+                month=input_month,
+                resolution_hours=input_resolution,
+            )
+            
+            # Display results
+            col1, col2 = st.columns([2, 1])
+            with col1:
+                st.success(f"**Predicted Level:** {pred_name}")
+                st.write(f"**Confidence:** {pred_proba[pred_level]:.1%}")
+            
+            with col2:
+                # Show all class probabilities
+                st.write("**All Levels:**")
+                for i, prob in enumerate(pred_proba):
+                    level_name = LEVEL_NAMES[i].split()[1]
+                    st.write(f"{LEVEL_NAMES[i]}: {prob:.1%}")
 
-            pred_log_hours = float(reg_model.predict(reg_input)[0])
-            pred_hours = max(float(np.expm1(pred_log_hours)), 0.0)
-            pred_days = pred_hours / 24.0
+    st.markdown('---')
+    st.subheader("Dataset Insights: NYC 311 Road Complaints")
 
-            st.success(f"Predicted Resolution Time: {pred_hours:.1f} hours")
-            st.write(f"Approximate Days: {pred_days:.2f}")
+    DATA_PATH_311 = ROOT_DIR / "data" / "raw" / "urbanpulse_311_complaints.csv"
+
+    @st.cache_data
+    def _compute_batch_preds(_model, _scaler, feat_names, data_path):
+        from train import clean_data
+        from predict import (
+            filter_road_complaints,
+            create_deterioration_label,
+            build_road_features,
+            NUMERIC_FEATURES as NF,
+        )
+        df = pd.read_csv(data_path)
+        df_clean = clean_data(df)
+        df_road = filter_road_complaints(df_clean)
+        if df_road.empty:
+            return pd.DataFrame()
+        df_road = create_deterioration_label(df_road)
+        X, _ = build_road_features(df_road)
+        for col in feat_names:
+            if col not in X.columns:
+                X[col] = 0
+        X = X[list(feat_names)].copy()
+        num_cols = [c for c in NF if c in X.columns]
+        X[num_cols] = _scaler.transform(X[num_cols])
+        preds = _model.predict(X)
+        proba = _model.predict_proba(X)
+        df_road = df_road.reset_index(drop=True)
+        level_map = {0: 'Low', 1: 'Medium', 2: 'High', 3: 'Critical'}
+        out = df_road[['complaint_type', 'borough']].copy()
+        out['level_name'] = pd.Series(preds).map(level_map).values
+        out['confidence'] = proba.max(axis=1).round(4)
+        return out
+
+    with st.expander("📊 Batch Predictions on Full Dataset", expanded=False):
+        st.caption("Source: `data/raw/urbanpulse_311_complaints.csv`")
+        with st.spinner("Processing dataset (first run may take a moment) …"):
+            try:
+                batch_df = _compute_batch_preds(
+                    model, scaler, tuple(feature_names), str(DATA_PATH_311)
+                )
+                if batch_df.empty:
+                    st.warning("No road-related complaints found in the dataset.")
+                else:
+                    c1, c2, c3 = st.columns(3)
+                    c1.metric("Road Complaints", f"{len(batch_df):,}")
+                    c2.metric("Avg Confidence", f"{batch_df['confidence'].mean():.1%}")
+                    c3.metric("Most Common Level", batch_df['level_name'].mode()[0])
+
+                    st.write("**Prediction Distribution**")
+                    dist = (
+                        batch_df['level_name']
+                        .value_counts()
+                        .reindex(['Low', 'Medium', 'High', 'Critical'], fill_value=0)
+                    )
+                    st.bar_chart(dist)
+
+                    st.write("**By Borough**")
+                    borough_pivot = (
+                        batch_df.groupby(['borough', 'level_name'])
+                        .size()
+                        .unstack(fill_value=0)
+                        .reindex(columns=['Low', 'Medium', 'High', 'Critical'], fill_value=0)
+                    )
+                    st.dataframe(borough_pivot)
+
+                    st.write("**By Complaint Type**")
+                    type_pivot = (
+                        batch_df.groupby(['complaint_type', 'level_name'])
+                        .size()
+                        .unstack(fill_value=0)
+                        .reindex(columns=['Low', 'Medium', 'High', 'Critical'], fill_value=0)
+                    )
+                    st.dataframe(type_pivot)
+
+                    st.write("**Sample Predictions (first 100 rows)**")
+                    st.dataframe(batch_df.head(100))
+            except Exception as e:
+                st.error(f"Failed to run batch predictions: {e}")
+
+    st.info("💡 Tip: Use the example buttons above to load pre-configured scenarios!")
