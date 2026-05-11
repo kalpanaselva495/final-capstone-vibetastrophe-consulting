@@ -12,6 +12,7 @@ from pathlib import Path
 import sys
 from PIL import Image
 import joblib
+import numpy as np
 import pandas as pd
 from transformers import ( 
     DistilBertTokenizerFast,
@@ -402,12 +403,18 @@ elif model_choice == "Model 3: CNN (Image Classification)":
 elif model_choice == "Model 4: NLP (Text Classification)":
     st.header("Model 4: NLP — Text Classification")
 
+    categories = {
+        0: "Blocked Driveway",
+        1: "Heat/Hot water",
+        2: "Illegal Parking",
+        3: "Noise - Residential",
+        4: "Other",
+        5: "Snow or Ice"
+    }
+
     # ---- INTEGRATION PATTERN (uncomment and adapt) ----
     @st.cache_resource
     def load_model4():
-        # import joblib
-        # model = joblib.load("models/model4_nlp_classification/saved_model/model.joblib")
-        # vectorizer = joblib.load("models/model4_nlp_classification/saved_model/vectorizer.joblib")
         model = DistilBertForSequenceClassification.from_pretrained("models/model4_nlp_classification/saved_model/")
         tokenizer = DistilBertTokenizerFast.from_pretrained("models/model4_nlp_classification/saved_model/")
         model.eval()
@@ -421,11 +428,214 @@ elif model_choice == "Model 4: NLP (Text Classification)":
         outputs = model(**inputs)
         prediction = outputs.logits.argmax(dim=1).item()
         confidence = outputs.logits.softmax(dim=1).max().item()
-        st.success(f"Predicted Category: {prediction}")
+        st.success(f"Predicted Category: {categories[prediction]}")
         st.write(f"Confidence: {confidence:.2%}")
     # ---- END PATTERN ----
 
 elif model_choice == "Model 5: Innovation":
     st.header("Model 5: Innovation")
-    # TODO: Add your custom model interface
-    st.info("Not yet implemented — add your innovation model interface here.")
+    st.write("Predict 311 complaint category and expected resolution time.")
+    
+    @st.cache_resource
+    def load_model5():
+        base_path = Path("models/model5_innovation/saved_model")
+        return {
+            "clf_model": joblib.load(base_path / "clf_model.joblib"),
+            "clf_le": joblib.load(base_path / "clf_le.joblib"),
+            "reg_model": joblib.load(base_path / "reg_model.joblib"),
+            "reg_le": joblib.load(base_path / "reg_le.joblib"),
+            "reg_feature_cols": joblib.load(base_path / "reg_feature_cols.joblib"),
+        }
+
+    model_bundle = load_model5()
+    clf_model = model_bundle["clf_model"]
+    clf_le = model_bundle["clf_le"]
+    reg_model = model_bundle["reg_model"]
+    reg_le = model_bundle["reg_le"]
+
+    status_mapping = {
+        "Open": 0,
+        "Assigned": 1,
+        "Started": 2,
+        "In Progress": 3,
+        "Pending": 4,
+        "Closed": 5,
+        "Unspecified": 0,
+    }
+
+    day_names = [
+        "Monday",
+        "Tuesday",
+        "Wednesday",
+        "Thursday",
+        "Friday",
+        "Saturday",
+        "Sunday",
+    ]
+    month_names = [
+        "January",
+        "February",
+        "March",
+        "April",
+        "May",
+        "June",
+        "July",
+        "August",
+        "September",
+        "October",
+        "November",
+        "December",
+    ]
+    season_mapping = {
+        12: 0,
+        1: 0,
+        2: 0,
+        3: 1,
+        4: 1,
+        5: 1,
+        6: 2,
+        7: 2,
+        8: 2,
+        9: 3,
+        10: 3,
+        11: 3,
+    }
+
+    def get_hour_bucket(hour):
+        if hour < 6:
+            return 0
+        if hour < 12:
+            return 1
+        if hour < 18:
+            return 2
+        return 3
+
+    def build_onehot_value(feature_name):
+        if feature_name.startswith("borough_"):
+            return feature_name.split("borough_", 1)[1]
+        if feature_name.startswith("open_data_channel_type_"):
+            return feature_name.split("open_data_channel_type_", 1)[1]
+        if feature_name.startswith("agency_"):
+            return feature_name.split("agency_", 1)[1]
+        return None
+
+    def build_feature_row(feature_names, *, status, created_hour, created_dayofweek, created_month,
+                          is_resolved, borough, channel, agency, resolution_hours=None,
+                          complaint_type_label=None):
+        row_data = {str(col): 0 for col in feature_names}
+        row_data["status"] = status_mapping[status]
+        row_data["created_hour"] = int(created_hour)
+        row_data["created_dayofweek"] = day_names.index(created_dayofweek)
+        row_data["created_month"] = month_names.index(created_month) + 1
+        row_data["is_resolved"] = 1 if is_resolved else 0
+        row_data["is_weekend"] = 1 if row_data["created_dayofweek"] >= 5 else 0
+        row_data["season"] = season_mapping[row_data["created_month"]]
+        row_data["hour_bucket"] = get_hour_bucket(row_data["created_hour"])
+
+        borough_col = f"borough_{borough}"
+        channel_col = f"open_data_channel_type_{channel}"
+        agency_col = f"agency_{agency}"
+
+        if borough_col in row_data:
+            row_data[borough_col] = 1
+        if channel_col in row_data:
+            row_data[channel_col] = 1
+        if agency_col in row_data:
+            row_data[agency_col] = 1
+
+        if "resolution_hours" in row_data:
+            row_data["resolution_hours"] = float(resolution_hours if resolution_hours is not None else 0.0)
+
+        if "complaint_type_enc" in row_data and complaint_type_label is not None:
+            row_data["complaint_type_enc"] = int(reg_le.transform([complaint_type_label])[0])
+
+        return pd.DataFrame([[row_data[col] for col in feature_names]], columns=feature_names)
+
+    clf_features = [str(col) for col in clf_model.feature_names_in_]
+    reg_features = [str(col) for col in reg_model.feature_names_in_]
+
+    borough_options = [build_onehot_value(c) for c in clf_features if str(c).startswith("borough_")]
+    channel_options = [
+        build_onehot_value(c)
+        for c in clf_features
+        if str(c).startswith("open_data_channel_type_")
+    ]
+    agency_options = [build_onehot_value(c) for c in clf_features if str(c).startswith("agency_")]
+
+    col1, col2 = st.columns(2)
+    with col1:
+        input_status = st.selectbox("Status", options=list(status_mapping.keys()), index=3)
+        input_hour = st.slider("Created Hour", min_value=0, max_value=23, value=12)
+        input_day = st.selectbox("Created Day of Week", options=day_names, index=0)
+        input_month = st.selectbox("Created Month", options=month_names, index=0)
+        input_is_resolved = st.selectbox("Is Resolved", options=["No", "Yes"], index=0)
+    with col2:
+        input_borough = st.selectbox("Borough", options=borough_options, index=0)
+        input_channel = st.selectbox("Open Data Channel Type", options=channel_options, index=0)
+        input_agency = st.selectbox("Agency", options=agency_options, index=0)
+        input_resolution_hours = st.number_input(
+            "Resolution Hours (required for classification model)",
+            min_value=0.0,
+            max_value=10000.0,
+            value=24.0,
+            step=1.0,
+        )
+
+    is_resolved_bool = input_is_resolved == "Yes"
+
+    tab1, tab2 = st.tabs(["Classification", "Regression"])
+
+    with tab1:
+        st.caption("Classification model predicts complaint type.")
+        if st.button("Predict Complaint Type", key="predict_model5_classification"):
+            clf_input = build_feature_row(
+                clf_features,
+                status=input_status,
+                created_hour=input_hour,
+                created_dayofweek=input_day,
+                created_month=input_month,
+                is_resolved=is_resolved_bool,
+                borough=input_borough,
+                channel=input_channel,
+                agency=input_agency,
+                resolution_hours=input_resolution_hours,
+            )
+
+            pred_encoded = int(clf_model.predict(clf_input)[0])
+            pred_label = clf_le.inverse_transform([pred_encoded])[0]
+            proba = clf_model.predict_proba(clf_input)[0]
+            confidence = float(np.max(proba))
+
+            st.success(f"Predicted Complaint Type: {pred_label}")
+            st.write(f"Confidence: {confidence:.2%}")
+
+    with tab2:
+        st.caption("Regression model predicts expected resolution time.")
+        complaint_options = [str(c) for c in reg_le.classes_]
+        reg_complaint_label = st.selectbox(
+            "Complaint Type for Regression",
+            options=complaint_options,
+            index=0,
+            key="model5_reg_complaint_type",
+        )
+
+        if st.button("Predict Resolution Time", key="predict_model5_regression"):
+            reg_input = build_feature_row(
+                reg_features,
+                status=input_status,
+                created_hour=input_hour,
+                created_dayofweek=input_day,
+                created_month=input_month,
+                is_resolved=is_resolved_bool,
+                borough=input_borough,
+                channel=input_channel,
+                agency=input_agency,
+                complaint_type_label=reg_complaint_label,
+            )
+
+            pred_log_hours = float(reg_model.predict(reg_input)[0])
+            pred_hours = max(float(np.expm1(pred_log_hours)), 0.0)
+            pred_days = pred_hours / 24.0
+
+            st.success(f"Predicted Resolution Time: {pred_hours:.1f} hours")
+            st.write(f"Approximate Days: {pred_days:.2f}")

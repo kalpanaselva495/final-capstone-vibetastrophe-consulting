@@ -7,6 +7,7 @@ This module handles:
 - Training XGBoost classification and regression models
 """
 
+import joblib
 import pandas as pd
 import numpy as np
 import re
@@ -305,6 +306,19 @@ def train_regression_model(X_reg_train, X_reg_test, y_reg_train, y_reg_test):
     
     return xgb_reg, y_reg_pred, mae, rmse, r2
 
+# ============================================================================
+# MODEL SAVING
+# ============================================================================
+
+def save_models(clf_model, clf_le, reg_model, reg_le, reg_feature_cols):
+    """Save trained models and encoders."""
+    # os.makedirs("saved_models", exist_ok=True)
+    joblib.dump(clf_model, "models/kalpana_ innovation_model/saved_model/clf_model.joblib")
+    joblib.dump(clf_le, "models/kalpana_ innovation_model/saved_model/clf_le.joblib")
+    joblib.dump(reg_model, "models/kalpana_ innovation_model/saved_model/reg_model.joblib")
+    joblib.dump(reg_le, "models/kalpana_ innovation_model/saved_model/reg_le.joblib")
+    joblib.dump(reg_feature_cols, "models/kalpana_ innovation_model/saved_model/reg_feature_cols.joblib")
+
 
 # ============================================================================
 # MAIN PIPELINE
@@ -315,7 +329,7 @@ def main():
     
     # 1. Load data
     print("Loading data...")
-    df = load_customer_data('../../data/raw/urbanpulse_311_complaints.csv')
+    df = load_customer_data('data/raw/smart_city_csvs/urbanpulse_311_complaints.csv')
     print(f"Loaded: {df.shape[0]:,} rows, {df.shape[1]} columns\n")
     
     # 2. Prepare features
@@ -384,6 +398,8 @@ def main():
         X_reg_train, X_reg_test, y_reg_train, y_reg_test
     )
     
+    save_models(clf_model, le, reg_model, le_type, reg_feature_cols)
+
     print("\n" + "=" * 70)
     print("TRAINING COMPLETE")
     print("=" * 70)
