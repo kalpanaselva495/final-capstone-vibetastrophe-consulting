@@ -561,18 +561,27 @@ elif model_choice == "Model 5: Innovation":
         if col.button(f'📊 {lvl}', use_container_width=True, key=f'btn_m5_{lvl}'):
             for k, v in ex.items():
                 st.session_state[f'model5_{k}'] = v
+                st.session_state[f'model5_{k}_input'] = v  # keep widget keys in sync
             st.rerun()
-    
+
     st.markdown('---')
-    
+
+    # Compute selectbox indices from session state so example buttons update dropdowns
+    _complaint_opts = sorted(ROAD_COMPLAINT_TYPES)
+    _ct_default      = st.session_state.get('model5_complaint_type', _complaint_opts[0])
+    _borough_default = st.session_state.get('model5_borough', BOROUGHS[0])
+    _status_default  = st.session_state.get('model5_status', STATUSES[0])
+    _channel_default = st.session_state.get('model5_channel', CHANNELS[0])
+    _day_default     = st.session_state.get('model5_day', DAY_NAMES[1])
+
     # Input form
     with st.form('model5_form'):
         col1, col2 = st.columns(2)
         with col1:
             input_complaint = st.selectbox(
                 "Complaint Type",
-                options=sorted(ROAD_COMPLAINT_TYPES),
-                index=0,
+                options=_complaint_opts,
+                index=_complaint_opts.index(_ct_default) if _ct_default in _complaint_opts else 0,
                 key='model5_complaint_type_input',
             )
             input_descriptor = st.text_input(
@@ -583,21 +592,21 @@ elif model_choice == "Model 5: Innovation":
             input_borough = st.selectbox(
                 "Borough",
                 options=BOROUGHS,
-                index=0 if BOROUGHS else None,
+                index=BOROUGHS.index(_borough_default) if _borough_default in BOROUGHS else 0,
                 key='model5_borough_input',
             )
             input_status = st.selectbox(
                 "Status",
                 options=STATUSES,
-                index=0 if STATUSES else None,
+                index=STATUSES.index(_status_default) if _status_default in STATUSES else 0,
                 key='model5_status_input',
             )
-        
+
         with col2:
             input_channel = st.selectbox(
                 "Channel",
                 options=CHANNELS,
-                index=0 if CHANNELS else None,
+                index=CHANNELS.index(_channel_default) if _channel_default in CHANNELS else 0,
                 key='model5_channel_input',
             )
             input_hour = st.slider(
@@ -610,7 +619,7 @@ elif model_choice == "Model 5: Innovation":
             input_day = st.selectbox(
                 "Day of Week",
                 options=DAY_NAMES,
-                index=1,
+                index=DAY_NAMES.index(_day_default) if _day_default in DAY_NAMES else 1,
                 key='model5_day_input',
             )
             input_month = st.slider(
@@ -624,7 +633,7 @@ elif model_choice == "Model 5: Innovation":
                 "Resolution Hours",
                 min_value=0.0,
                 max_value=1000.0,
-                value=st.session_state.get('model5_resolution_hours', 24.0),
+                value=float(st.session_state.get('model5_resolution_hours', 24.0)),
                 step=1.0,
                 key='model5_resolution_input',
             )
