@@ -137,15 +137,28 @@ def convert_feature_value(feature_name, value):
 
 # Page config
 st.set_page_config(
-    page_title="AI Capstone Dashboard",
-    page_icon="🔬",
+    page_title="SmartCity FSA | AI Dashboard",
+    page_icon="🏙️",
     layout="wide",
 )
 
-st.title("AI Capstone Dashboard")
-st.write("Select a model from the sidebar to make predictions.")
+# Header
+st.markdown("""
+    <div style='text-align:center; padding: 1rem 0 0.5rem 0;'>
+        <h1 style='font-size:2.6rem; margin-bottom:0;'>🏙️ SmartCity FSA</h1>
+        <p style='font-size:1.1rem; color:#90CAF9; margin-top:0.3rem;'>
+            AI-Powered Urban Intelligence Platform &nbsp;|&nbsp; www.smartcityfsa.com
+        </p>
+    </div>
+    <hr style='border:1px solid #1E88E5; margin-bottom:1.5rem;'>
+""", unsafe_allow_html=True)
 
 # Sidebar navigation
+st.sidebar.image("https://img.icons8.com/fluency/96/city.png", width=60)
+st.sidebar.markdown("## SmartCity FSA")
+st.sidebar.markdown("AI Urban Intelligence")
+st.sidebar.markdown("---")
+
 model_choice = st.sidebar.selectbox(
     "Choose a Model",
     [
@@ -158,29 +171,34 @@ model_choice = st.sidebar.selectbox(
     ],
 )
 
-# ---------------------------------------------------------------------------
-# Helper: Cache model loading so it only happens once
-# ---------------------------------------------------------------------------
-# Use @st.cache_resource for models — they load once and stay in memory.
-#
-# Example:
-#     @st.cache_resource
-#     def load_model1():
-#         import joblib
-#         return joblib.load("models/model1_traditional_ml/saved_model/model.joblib")
-#
-#     @st.cache_resource
-#     def load_model3():
-#         import tensorflow as tf
-#         return tf.keras.models.load_model("models/model3_cnn/saved_model/model.keras")
+st.sidebar.markdown("---")
+st.sidebar.caption("www.smartcityfsa.com")
 
 # ---------------------------------------------------------------------------
-# Model pages — fill these in with your model loading and prediction logic
+# Model pages
 # ---------------------------------------------------------------------------
 
 if model_choice == "Home":
-    st.write("Welcome! Use the sidebar to navigate between models.")
-    st.write("Each model page lets you input data and see predictions in real time.")
+    st.markdown("### Welcome to SmartCity FSA AI Platform")
+    st.markdown("Use the sidebar to navigate between AI models. Each model makes real-time predictions on urban data.")
+
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.info("**Model 1: Traditional ML**\n\nPredicts traffic accident severity using Random Forest on weather & road features.")
+        st.info("**Model 2: Deep Learning**\n\nDeep neural network for accident severity prediction using the same feature set.")
+    with col2:
+        st.info("**Model 3: CNN**\n\nEfficientNetB0 image classifier — detects potholes from road images.")
+        st.info("**Model 4: NLP**\n\nDistilBERT text classifier — categorises NYC 311 complaint descriptions.")
+    with col3:
+        st.info("**Model 5: Innovation**\n\nXGBoost road deterioration predictor using NYC 311 data. Rates severity: Low → Critical.")
+        st.success("**Live Data**\n\n434,722 NYC 311 complaints processed for batch predictions.")
+
+    st.markdown("---")
+    st.markdown("""
+        <div style='text-align:center; color:#90CAF9; font-size:0.9rem;'>
+            SmartCity FSA &nbsp;|&nbsp; AI Capstone Project &nbsp;|&nbsp; www.smartcityfsa.com
+        </div>
+    """, unsafe_allow_html=True)
 
 elif model_choice == "Model 1: Traditional ML":
     st.header("Model 1: Traditional ML")

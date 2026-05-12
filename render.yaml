@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: smartcityfsa
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: standard
+    region: oregon
+    envVars:
+      - key: PYTHONUNBUFFERED
+        value: "1"
+    domains:
+      - www.smartcityfsa.com
+      - smartcityfsa.com
+    healthCheckPath: /_stcore/health
