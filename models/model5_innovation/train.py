@@ -285,7 +285,8 @@ def train_model(X_train, y_train, model_type='random_forest', random_state=42):
     if model_type == 'random_forest':
         model = RandomForestClassifier(
             n_estimators=100, max_depth=15,
-            n_jobs=-1, random_state=random_state
+            n_jobs=-1, random_state=random_state,
+            class_weight='balanced'
         )
     elif model_type == 'gradient_boosting':
         model = GradientBoostingClassifier(
@@ -314,9 +315,11 @@ def evaluate_model(model, X_test, y_test):
 # Main
 # ---------------------------------------------------------------------------
 if __name__ == '__main__':
-    DATA_PATH  = 'urbanpulse_311_complaints.csv'
-    MODEL_PATH = 'model.joblib'
-    SCALER_PATH = 'scaler.joblib'
+    import pathlib
+    _ROOT = pathlib.Path(__file__).resolve().parents[2]
+    DATA_PATH   = str(_ROOT / 'data' / 'raw' / 'urbanpulse_311_complaints.csv')
+    MODEL_PATH  = str(pathlib.Path(__file__).parent / 'model.joblib')
+    SCALER_PATH = str(pathlib.Path(__file__).parent / 'scaler.joblib')
 
     print("=== Loading data ===")
     df = load_customer_data(DATA_PATH)
