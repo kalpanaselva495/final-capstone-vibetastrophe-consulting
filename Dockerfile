@@ -2,9 +2,13 @@ FROM python:3.11-slim
 
 ENV PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    PIP_ROOT_USER_ACTION=ignore
+    PIP_ROOT_USER_ACTION=ignore \
+    HOME=/home/appuser
 
-WORKDIR /stapp
+# Create non-root user (required by Hugging Face Spaces)
+RUN useradd -m -u 1000 appuser
+
+WORKDIR /home/appuser/app
 
 # Install Python dependencies first to maximize Docker layer cache reuse.
 COPY requirements.txt ./requirements.txt
@@ -12,7 +16,9 @@ RUN python -m pip install --index-url https://download.pytorch.org/whl/cpu --ext
     python -m pip install -r requirements.txt
 
 # Copy local project files into the image.
-COPY . .
+COPY --chown=appuser:appuser . .
+
+USER appuser
 
 EXPOSE 8501
 
