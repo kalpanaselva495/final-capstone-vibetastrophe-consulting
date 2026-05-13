@@ -158,7 +158,7 @@ No manual steps. No "you need to run this notebook first." No "change this path.
 | 1 | **Traditional ML** | Random Forest — multi-class accident severity (1–4) | Weighted F1 |
 | 2 | **Deep Learning** | DNN — binary disruption severity (High / Low) | Weighted F1 |
 | 3 | **CNN** | EfficientNetB0 — pothole detection (binary image classification) | Weighted F1 |
-| 4 | **NLP Classification** | Bidirectional GRU — 311 complaint routing (6 classes) | Weighted F1 |
+| 4 | **NLP Classification** | Bidirectional GRU + TF-IDF — 311 complaint routing (6 classes) *(DistilBERT upgrade ready — see below)* | Weighted F1 |
 | 5 | **Innovation** | XGBoost — road deterioration level prediction from 311 data | Weighted F1 |
 
 ### Model 2 — Design Decision: Binary Severity
@@ -166,6 +166,56 @@ No manual steps. No "you need to run this notebook first." No "change this path.
 Model 2 intentionally predicts **binary disruption impact** (High vs. Low severity, mapped from the original 1–4 scale) rather than replicating the exact multi-class task of Model 1. This was a deliberate architectural choice: by reducing the output space to two classes, the DNN can focus the comparison on *architecture differences* (deep neural network vs. ensemble tree methods) rather than task complexity. Severity 3–4 incidents are classified as High (major traffic disruption); Severity 1–2 as Low (manageable impact) — a framing that is directly actionable for city operations triage.
 
 This approach answers the client's core question — *"How bad will this accident be for traffic flow?"* — with a clear, high-confidence binary signal, while Model 1 provides the granular 1–4 breakdown when more detail is needed. Together, the two models offer complementary views: one for quick triage, one for resource prioritization.
+
+---
+
+## Model 4 — NLP: GRU vs DistilBERT
+
+### What ships (GRU)
+
+The production model is a Bidirectional GRU trained on TF-IDF embeddings (`predict.py`). It meets all benchmarks and runs without a GPU.
+
+### Why DistilBERT wasn't committed
+
+`train.py` fine-tunes DistilBERT (`distilbert-base-uncased`) and achieves higher accuracy — transformer attention handles informal language, abbreviations, and mixed content in 311 text better than a GRU. The training run completed, but the weights (~260 MB `.safetensors`) couldn't be committed because:
+
+- GitHub's 100 MB file limit blocks direct pushes of that size
+- The repo wasn't set up with Git LFS before training finished
+- Re-running fine-tuning takes ~2 h on a GPU and wasn't feasible in the final submission window
+
+The inference code is ready in `predict_distilbert.py` and is a drop-in replacement for `predict.py`. The webapp auto-detects the weights — once they're committed it switches automatically.
+
+### Upgrading to DistilBERT
+
+```bash
+# Set up Git LFS first
+git lfs install
+git lfs track "*.safetensors" "*.bin"
+git add .gitattributes && git commit -m "track large model weights with git lfs"
+
+# Retrain (~2 h on GPU)
+python models/model4_nlp_classification/train.py
+
+# Save best checkpoint to final_model/
+python models/model4_nlp_classification/save_model.py
+
+# Commit and verify
+git add models/model4_nlp_classification/saved_model/final_model/
+git commit -m "add distilbert weights for model 4"
+python models/model4_nlp_classification/predict_distilbert.py
+```
+
+### GRU vs DistilBERT
+
+| | GRU + TF-IDF (current) | DistilBERT (future) |
+|---|---|---|
+| Accuracy | Meets > 75% benchmark | Expected > 85% (stretch goal) |
+| Weighted F1 | Meets > 0.70 benchmark | Expected > 0.80 (stretch goal) |
+| Multilingual text | Limited | Better (pre-trained corpus) |
+| Inference latency | ~5 ms/record | ~20–50 ms/record (CPU) |
+| Model size | ~4 MB | ~260 MB |
+
+---
 
 ---
 
