@@ -188,7 +188,7 @@ if model_choice == "Home":
         st.info("**Model 2: Deep Learning**\n\nDeep neural network for accident severity prediction using the same feature set.")
     with col2:
         st.info("**Model 3: CNN**\n\nEfficientNetB0 image classifier — detects potholes from road images.")
-        st.info("**Model 4: NLP**\n\nDistilBERT text classifier — categorises NYC 311 complaint descriptions.")
+        st.info("**Model 4: NLP**\n\nBidirectional GRU with TF-IDF embeddings — classifies 311 complaint descriptions into 6 categories.")
     with col3:
         st.info("**Model 5: Innovation**\n\nXGBoost road deterioration predictor using NYC 311 data. Rates severity: Low → Critical.")
         st.success("**Live Data**\n\n434,722 NYC 311 complaints processed for batch predictions.")
@@ -292,6 +292,17 @@ elif model_choice == "Model 1: Traditional ML":
 
     st.info("Enter values above and click **Predict** to classify traffic accident severity.")
 
+    st.markdown("---")
+    st.subheader("Feature Importance")
+    st.caption("Top 15 features by Random Forest Gini importance.")
+    _importance_df = (
+        pd.DataFrame({"Feature": feature_cols, "Importance": model.feature_importances_})
+        .sort_values("Importance", ascending=False)
+        .head(15)
+        .set_index("Feature")
+    )
+    st.bar_chart(_importance_df)
+
 elif model_choice == "Model 2: Deep Learning":
     st.header("Model 2: Deep Learning")
     # TODO: Load your DNN model and add prediction interface
@@ -391,7 +402,37 @@ elif model_choice == "Model 2: Deep Learning":
         label = "High Severity" if predictions[0][0] >= 0.5 else "Low Severity"
         st.success(f"Prediction: {label}")
         st.write(f"Confidence: {predictions[0][0]:.2%}")
-        
+
+    st.markdown("---")
+    st.subheader("Model 1 vs Model 2 — Architecture Comparison")
+    _cmp = pd.DataFrame({
+        "": [
+            "Architecture",
+            "Output",
+            "Imbalance handling",
+            "Interpretability",
+            "Best for",
+        ],
+        "Model 1 — Random Forest": [
+            "Ensemble of decision trees",
+            "Severity 1 / 2 / 3 / 4",
+            "Class weights + balanced sampling",
+            "High — feature importance",
+            "Resource prioritisation",
+        ],
+        "Model 2 — Deep Neural Network": [
+            "3-layer fully connected DNN",
+            "High (Sev 3–4) or Low (Sev 1–2)",
+            "Class weights in binary cross-entropy",
+            "Moderate",
+            "Fast operational triage",
+        ],
+    }).set_index("")
+    st.table(_cmp)
+    st.caption(
+        "Model 2 uses binary output by design — it isolates the DNN vs. ensemble comparison "
+        "from task complexity. Model 1 handles the full 1–4 breakdown."
+    )
 
 elif model_choice == "Model 3: CNN (Image Classification)":
     from models.model3_cnn.inference import THRESHOLD, predict_single_image
@@ -463,6 +504,17 @@ elif model_choice == "Model 4: NLP (Text Classification)":
         "Paste or load a **resolution description** from a 311 complaint to classify "
         "it into one of 6 complaint categories."
     )
+
+    _distilbert_weights = (
+        ROOT_DIR / "models" / "model4_nlp_classification" / "saved_model" / "final_model" / "model.safetensors"
+    )
+    if _distilbert_weights.exists():
+        st.success("Active model: DistilBERT (fine-tuned transformer)")
+    else:
+        st.info(
+            "Active model: Bidirectional GRU + TF-IDF. "
+            "DistilBERT upgrade ready — see `predict_distilbert.py` and README."
+        )
 
     _M4_DIR = ROOT_DIR / "models" / "model4_nlp_classification" / "saved_model"
 
